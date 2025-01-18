@@ -46,6 +46,7 @@ func (s *ProxyServer) Start() error {
 			"upstream_time": elapsed.String(),
 			"host":          c.Request.Host,
 			"remote_addr":   c.ClientIP(),
+			"params":        c.Request.URL.Query(),
 		})
 	})
 
@@ -146,7 +147,8 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 	}
 
 	proxy.ModifyResponse = func(response *http.Response) error {
-		if response.StatusCode >= 500 {
+		// ステータスコードが500以上または405の場合
+		if response.StatusCode >= 500 || response.StatusCode == 405 {
 			body, _ := io.ReadAll(response.Body) // エラーレスポンスのボディを読み取る
 			response.Body.Close()                // 元のレスポンスのボディを閉じる
 
@@ -155,9 +157,12 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 				"body":        string(body), // レスポンスのボディをログに記録
 			})
 
-			// プロキシサーバーでエラーレスポンスを返す
-			http.Error(response.Request.Context().Value("GinContext").(*gin.Context).Writer,
-				fmt.Sprintf("Upstream server error: %d", response.StatusCode), http.StatusBadGateway)
+			// GinのContextを使用してエラーレスポンスを返す
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": fmt.Sprintf("Upstream server error: %d", response.StatusCode),
+				"body":  string(body),
+			})
+
 			return fmt.Errorf("upstream server error: %d", response.StatusCode)
 		}
 
