@@ -31,7 +31,7 @@ func (s *ProxyServer) Start() error {
 		})
 	})
 
-	engine.Any("/proxy", func(c *gin.Context) {
+	engine.Any("/proxy/*path", func(c *gin.Context) {
 		start := time.Now() // Start time for request
 		s.proxyHandler(c)
 		elapsed := time.Since(start) // Total request processing time
@@ -42,7 +42,7 @@ func (s *ProxyServer) Start() error {
 		})
 	})
 
-	addr := fmt.Sprintf(":%d", s.config.httpPort)
+	addr := fmt.Sprintf(":%d", s.config.HttpPort)
 	if err := engine.Run(addr); err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
@@ -85,7 +85,7 @@ func logRequestAsJSON(req *http.Request, start time.Time) {
 }
 
 func (s *ProxyServer) proxyHandler(c *gin.Context) {
-	targetURL := s.config.proxyServerAddr
+	targetURL := s.config.ProxyServerAddr
 
 	// Parse the target URL
 	target, err := url.Parse(targetURL)
@@ -102,26 +102,22 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = s.config.httpClient
 
-	req := c.Request
-	req.Host = target.Host
-	req.URL.Scheme = target.Scheme
-	req.URL.Host = target.Host
-	req.URL.Path = target.Path
+	// Customize Director to modify the request path
+	proxy.Director = func(req *http.Request) {
+		originalPath := req.URL.Path
+		// Remove the "/proxy" prefix
+		req.URL.Path = removePrefix(originalPath, "/proxy")
+		req.Host = target.Host
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
 
-	// Measure time for proxy processing
-	start := time.Now()
-	logRequestAsJSON(req, start)
-
-	proxy.Director = func(proxyReq *http.Request) {
-		proxyReq.Host = target.Host
-		proxyReq.URL.Scheme = target.Scheme
-		proxyReq.URL.Host = target.Host
+		// Log the modified request
 		logAsJSON("Proxy request sent", map[string]interface{}{
-			"method": proxyReq.Method,
-			"url":    proxyReq.URL.String(),
+			"method": req.Method,
+			"url":    req.URL.String(),
 			"headers": func() map[string][]string {
 				headers := make(map[string][]string)
-				for key, values := range proxyReq.Header {
+				for key, values := range req.Header {
 					headers[key] = values
 				}
 				return headers
@@ -130,31 +126,28 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 	}
 
 	proxy.ModifyResponse = func(response *http.Response) error {
-		elapsed := time.Since(start) // Calculate proxy response time
 		logAsJSON("Proxy response received", map[string]interface{}{
-			"status_code":     response.StatusCode,
-			"processing_time": elapsed.String(),
+			"status_code": response.StatusCode,
 		})
-		if response.StatusCode >= 500 {
-			c.JSON(http.StatusBadGateway, gin.H{
-				"error": fmt.Sprintf("Upstream server error: %d", response.StatusCode),
-			})
-			response.Body.Close()
-			return fmt.Errorf("upstream server error: %d", response.StatusCode)
-		}
 		return nil
 	}
 
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
-		elapsed := time.Since(start)
 		logAsJSON("Proxy error", map[string]interface{}{
-			"error":           err.Error(),
-			"processing_time": elapsed.String(),
+			"error": err.Error(),
 		})
 		c.JSON(http.StatusGatewayTimeout, gin.H{
 			"error": "Upstream server timeout or other error",
 		})
 	}
 
-	proxy.ServeHTTP(c.Writer, req)
+	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+// removePrefix removes the given prefix from the path if it exists
+func removePrefix(path, prefix string) string {
+	if len(path) >= len(prefix) && path[:len(prefix)] == prefix {
+		return path[len(prefix):]
+	}
+	return path
 }

@@ -2,30 +2,53 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
-	// httpPort is the port on which the HTTP server listens.
-	httpPort int
-	// proxyServerAddr is the address of the proxy server.
-	proxyServerAddr string
-	// httpClient is the HTTP client used to make requests to the proxy server.
+	HttpPort        int    `toml:"http_port"`
+	ProxyServerAddr string `toml:"proxy_server_addr"`
+	HTTPProxy       string `toml:"http_proxy"`
+	HTTPSProxy      string `toml:"https_proxy"`
+
+	HTTPClientTimeout    time.Duration `toml:"http_client_timeout"`
+	HTTPClientRetries    int           `toml:"http_client_retries"`
+	HTTPClientKeepAlives int           `toml:"http_client_keep_alives"`
+
+	Debug bool `toml:"debug"`
+
 	httpClient *http.Transport
 }
 
+func loadTomlConfig(config *Config) error {
+	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
+		log.Fatalf("Error reading TOML file: %s", err)
+		return err
+	}
+	return nil
+}
+
 func startHTTPServer() error {
+	var config Config
+	if err := loadTomlConfig(&config); err != nil {
+		return fmt.Errorf("failed to load TOML config: %w", err)
+	}
+
+	fmt.Println("HTTP Port:", config.HTTPClientTimeout*time.Second)
 	customTransport := &http.Transport{
 		// Proxy settings
-		Proxy: http.ProxyFromEnvironment, // Use environment variables like HTTP_PROXY or HTTPS_PROXY
+		Proxy: http.ProxyFromEnvironment, // Proxy function to use (e.g., http.ProxyFromEnvironment)
 
 		// Dialer settings
 		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second, // Timeout for connecting to the server
-			KeepAlive: 30 * time.Second, // Keep-alive duration for TCP connections
+			Timeout:   config.HTTPClientTimeout * time.Second, // Timeout for establishing connections
+			KeepAlive: 30 * time.Second,                       // Keep-alive duration for TCP connections
 		}).DialContext,
 
 		// TLS settings
@@ -55,11 +78,7 @@ func startHTTPServer() error {
 		DialTLSContext: nil, // Custom dialer for TLS connections (optional)
 	}
 
-	config := Config{
-		httpPort:        8080,
-		proxyServerAddr: "https://httpbin.org/get",
-		httpClient:      customTransport,
-	}
+	config.httpClient = customTransport
 
 	server := NewProxyServer(config)
 	if err := server.Start(); err != nil {
