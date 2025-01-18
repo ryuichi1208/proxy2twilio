@@ -37,10 +37,15 @@ func (s *ProxyServer) Start() error {
 		start := time.Now() // Start time for request
 		s.proxyHandler(c)
 		elapsed := time.Since(start) // Total request processing time
-		logAsJSON("Request completed", map[string]interface{}{
-			"method": c.Request.Method,
-			"url":    c.Request.URL.String(),
-			"time":   elapsed.String(),
+		logAsJSON("", map[string]interface{}{
+			"timestamp":     time.Now().Format(time.RFC3339),
+			"method":        c.Request.Method,
+			"url":           c.Request.URL.String(),
+			"status_code":   c.Writer.Status(),
+			"response_time": elapsed.String(),
+			"upstream_time": elapsed.String(),
+			"host":          c.Request.Host,
+			"remote_addr":   c.ClientIP(),
 		})
 	})
 
@@ -53,12 +58,7 @@ func (s *ProxyServer) Start() error {
 
 // logAsJSON logs structured data in JSON format.
 func logAsJSON(message string, data map[string]interface{}) {
-	logEntry := map[string]interface{}{
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"message":   message,
-		"data":      data,
-	}
-
+	logEntry := data
 	logEntryJSON, err := json.Marshal(logEntry)
 	if err != nil {
 		log.Printf("Error marshaling log entry to JSON: %v", err)
@@ -119,19 +119,21 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 	// ボディを再設定（消費されたため）
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-	// リクエストをログに記録
-	logAsJSON("Incoming request", map[string]interface{}{
-		"method": c.Request.Method,
-		"url":    c.Request.URL.String(),
-		"headers": func() map[string][]string {
-			headers := make(map[string][]string)
-			for key, values := range c.Request.Header {
-				headers[key] = values
-			}
-			return headers
-		}(),
-		"body": string(bodyBytes), // リクエストボディをログに含める
-	})
+	if s.config.Debug {
+		// リクエストをログに記録
+		logAsJSON("Incoming request", map[string]interface{}{
+			"method": c.Request.Method,
+			"url":    c.Request.URL.String(),
+			"headers": func() map[string][]string {
+				headers := make(map[string][]string)
+				for key, values := range c.Request.Header {
+					headers[key] = values
+				}
+				return headers
+			}(),
+			"body": string(bodyBytes), // リクエストボディをログに含める
+		})
+	}
 
 	// Customize Director to modify the request path
 	proxy.Director = func(req *http.Request) {
