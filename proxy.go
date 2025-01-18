@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -102,6 +104,35 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = s.config.httpClient
 
+	// リクエストボディを取得
+	bodyBytes, err := c.GetRawData()
+	if err != nil {
+		logAsJSON("Error reading request body", map[string]interface{}{
+			"error": err.Error(),
+		})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	// ボディを再設定（消費されたため）
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	// リクエストをログに記録
+	logAsJSON("Incoming request", map[string]interface{}{
+		"method": c.Request.Method,
+		"url":    c.Request.URL.String(),
+		"headers": func() map[string][]string {
+			headers := make(map[string][]string)
+			for key, values := range c.Request.Header {
+				headers[key] = values
+			}
+			return headers
+		}(),
+		"body": string(bodyBytes), // リクエストボディをログに含める
+	})
+
 	// Customize Director to modify the request path
 	proxy.Director = func(req *http.Request) {
 		originalPath := req.URL.Path
@@ -110,19 +141,6 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 		req.Host = target.Host
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
-
-		// Log the modified request
-		logAsJSON("Proxy request sent", map[string]interface{}{
-			"method": req.Method,
-			"url":    req.URL.String(),
-			"headers": func() map[string][]string {
-				headers := make(map[string][]string)
-				for key, values := range req.Header {
-					headers[key] = values
-				}
-				return headers
-			}(),
-		})
 	}
 
 	proxy.ModifyResponse = func(response *http.Response) error {
