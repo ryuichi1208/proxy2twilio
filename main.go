@@ -20,10 +20,40 @@ type Config struct {
 	HTTPClientTimeout    time.Duration `toml:"http_client_timeout"`
 	HTTPClientRetries    int           `toml:"http_client_retries"`
 	HTTPClientKeepAlives int           `toml:"http_client_keep_alives"`
+	TLSHandshakeTimeout  time.Duration `toml:"tls_handshake_timeout"`
 
 	Debug bool `toml:"debug"`
 
 	httpClient *http.Transport
+}
+
+func (c *Config) SetDefaults() {
+	if c.HttpPort == 0 {
+		c.HttpPort = 8080
+	}
+	if c.HTTPClientTimeout == 0 {
+		c.HTTPClientTimeout = 10 * time.Second
+	}
+	if c.HTTPClientRetries == 0 {
+		c.HTTPClientRetries = 3
+	}
+	if c.TLSHandshakeTimeout == 0 {
+		c.TLSHandshakeTimeout = 5 * time.Second
+	}
+	if c.httpClient == nil {
+		c.httpClient = &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   5 * time.Second,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			ForceAttemptHTTP2:     true,
+			ResponseHeaderTimeout: 5 * time.Second,
+		}
+	}
 }
 
 func loadTomlConfig(config *Config) error {
@@ -40,6 +70,8 @@ func startHTTPServer() error {
 		return fmt.Errorf("failed to load TOML config: %w", err)
 	}
 
+	config.SetDefaults()
+
 	fmt.Println("HTTP Port:", config.HTTPClientTimeout*time.Second)
 	customTransport := &http.Transport{
 		// Proxy settings
@@ -52,8 +84,8 @@ func startHTTPServer() error {
 		}).DialContext,
 
 		// TLS settings
-		TLSHandshakeTimeout: 10 * time.Second, // Timeout for TLS handshake
-		TLSClientConfig:     nil,              // Custom TLS configuration (e.g., certificates)
+		TLSHandshakeTimeout: config.TLSHandshakeTimeout * time.Second, // Timeout for TLS handshake
+		TLSClientConfig:     nil,                                      // Custom TLS configuration (e.g., certificates)
 
 		// Connection pool settings
 		MaxIdleConns:        100,              // Maximum number of idle connections
