@@ -146,6 +146,21 @@ func (s *ProxyServer) proxyHandler(c *gin.Context) {
 	}
 
 	proxy.ModifyResponse = func(response *http.Response) error {
+		if response.StatusCode >= 500 {
+			body, _ := io.ReadAll(response.Body) // エラーレスポンスのボディを読み取る
+			response.Body.Close()                // 元のレスポンスのボディを閉じる
+
+			logAsJSON("Upstream server error", map[string]interface{}{
+				"status_code": response.StatusCode,
+				"body":        string(body), // レスポンスのボディをログに記録
+			})
+
+			// プロキシサーバーでエラーレスポンスを返す
+			http.Error(response.Request.Context().Value("GinContext").(*gin.Context).Writer,
+				fmt.Sprintf("Upstream server error: %d", response.StatusCode), http.StatusBadGateway)
+			return fmt.Errorf("upstream server error: %d", response.StatusCode)
+		}
+
 		logAsJSON("Proxy response received", map[string]interface{}{
 			"status_code": response.StatusCode,
 		})
