@@ -79,8 +79,8 @@ func startHTTPServer() error {
 
 		// Dialer settings
 		DialContext: (&net.Dialer{
-			Timeout:   config.HTTPClientTimeout * time.Second, // Timeout for establishing connections
-			KeepAlive: 30 * time.Second,                       // Keep-alive duration for TCP connections
+			Timeout:   config.HTTPClientTimeout * time.Second,    // Timeout for establishing connections
+			KeepAlive: config.HTTPClientKeepAlives * time.Second, // Keep-alive duration for TCP connections
 		}).DialContext,
 
 		// TLS settings

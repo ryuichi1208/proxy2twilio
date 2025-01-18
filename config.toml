@@ -1,4 +1,5 @@
 http_port = 8080
 proxy_server_addr = "https://httpbin.org/"
 http_client_timeout = 5
+http_client_keep_alives = 5
 debug = true
